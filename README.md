@@ -1,2 +1,2 @@
-# Online-Shop-Express-Backend
+# CheckLit-server
 The backend for the online shop web.
