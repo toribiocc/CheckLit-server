@@ -1,95 +1,284 @@
+
 const express = require("express");
 const mongoose = require("mongoose");
 const ShoppingList = require("../models/ShoppingList");
+const Product = require("../models/Product");
 const authenticate = require("../middleware/auth");
 
 const router = express.Router();
 
-const allowedFields = [
+const editableFields = [
   "title",
   "store",
   "targetDate",
   "budget",
   "notes",
   "items",
-  "status",
 ];
 
-function pickAllowedFields(body) {
-  const result = {};
-
-  for (const field of allowedFields) {
-    if (Object.prototype.hasOwnProperty.call(body, field)) {
-      result[field] = body[field];
-    }
-  }
-
-  return result;
+function createError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
-function calculateTotals(items) {
-  if (!Array.isArray(items)) {
-    const error = new Error("Items must be an array.");
-    error.status = 400;
-    throw error;
+function roundCurrency(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function pickAllowedFields(body) {
+  const fields = {};
+
+  for (const field of editableFields) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      fields[field] = body[field];
+    }
   }
 
-  let totalCost = 0;
+  return fields;
+}
 
-  const calculatedItems = items.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      const error = new Error("Each item must be a valid object.");
-      error.status = 400;
-      throw error;
+function validateListFields(fields, isCreate = false) {
+  if (
+    (isCreate || Object.prototype.hasOwnProperty.call(fields, "title")) &&
+    (typeof fields.title !== "string" ||
+      !fields.title.trim() ||
+      fields.title.trim().length > 150)
+  ) {
+    throw createError(
+      "Shopping-list title is required and cannot exceed 150 characters."
+    );
+  }
+
+  for (const field of ["store", "targetDate", "notes"]) {
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) {
+      continue;
     }
 
-    const unitPrice = Number(item.unitPrice);
-    const quantity = Number(item.quantity);
+    if (typeof fields[field] !== "string") {
+      throw createError(`${field} must be a string.`);
+    }
+
+    fields[field] = fields[field].trim();
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(fields, "store") &&
+    fields.store.length > 150
+  ) {
+    throw createError("Store name cannot exceed 150 characters.");
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(fields, "notes") &&
+    fields.notes.length > 2000
+  ) {
+    throw createError("Notes cannot exceed 2000 characters.");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fields, "title")) {
+    fields.title = fields.title.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fields, "budget")) {
+    const budget = Number(fields.budget);
 
     if (
-      item.unitPrice === "" ||
-      item.quantity === "" ||
-      !Number.isFinite(unitPrice) ||
-      !Number.isFinite(quantity) ||
-      unitPrice < 0 ||
-      quantity < 0
+      fields.budget === "" ||
+      fields.budget === null ||
+      !Number.isFinite(budget) ||
+      budget < 0
     ) {
-      const error = new Error(
-        "Each item must have a valid, non-negative unit price and quantity."
-      );
-      error.status = 400;
-      throw error;
+      throw createError("Budget must be a valid non-negative number.");
     }
 
-    const totalPrice =
-      Math.round(
-        (unitPrice * quantity + Number.EPSILON) * 100
-      ) / 100;
+    fields.budget = budget;
+  }
 
-    totalCost += totalPrice;
-
-    return {
-      ...item,
-      unitPrice,
-      quantity,
-      totalPrice,
-    };
-  });
-
-  totalCost =
-    Math.round((totalCost + Number.EPSILON) * 100) / 100;
-
-  return {
-    items: calculatedItems,
-    totalCost,
-  };
+  return fields;
 }
 
-// All shopping-list routes require authentication.
+function getExistingItem(list, input, index) {
+  if (!list) return null;
+
+  const suppliedId = String(input.id || input._id || "");
+
+  if (suppliedId) {
+    const matchedById = list.items.find(
+      (item) => item._id && item._id.toString() === suppliedId
+    );
+
+    if (matchedById) return matchedById;
+  }
+
+  const productId = String(input.productId || "");
+
+  if (productId) {
+    const matchedByProduct = list.items.find(
+      (item) => String(item.productId || "") === productId
+    );
+
+    if (matchedByProduct) return matchedByProduct;
+  }
+
+  const legacyItem = list.items[index];
+
+  if (
+    legacyItem &&
+    !legacyItem.productId &&
+    !productId &&
+    legacyItem.name === input.name
+  ) {
+    return legacyItem;
+  }
+
+  return null;
+}
+
+async function prepareItems(inputItems, existingList = null) {
+  if (!Array.isArray(inputItems)) {
+    throw createError("Items must be an array.");
+  }
+
+  const prepared = [];
+
+  for (let index = 0; index < inputItems.length; index += 1) {
+    const input = inputItems[index];
+
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw createError("Each shopping-list item must be an object.");
+    }
+
+    const productId = String(input.productId || "").trim();
+    const quantity = Number(input.quantity);
+
+    if (
+      input.quantity === "" ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
+      throw createError("Each item quantity must be greater than zero.");
+    }
+
+    if (
+      input.completed !== undefined &&
+      typeof input.completed !== "boolean"
+    ) {
+      throw createError("The purchased status must be a boolean.");
+    }
+
+    const previous = getExistingItem(existingList, input, index);
+
+    let product = null;
+
+    if (productId && mongoose.isValidObjectId(productId)) {
+      product = await Product.findById(productId);
+    }
+
+    if (!product && !previous) {
+      throw createError(
+        "A selected product no longer exists in the catalog. Refresh the catalog and select an available product."
+      );
+    }
+
+    if (!product && previous && productId !== String(previous.productId || "")) {
+      throw createError(
+        "The selected product is not available in the catalog."
+      );
+    }
+
+    if (!product && previous && previous.productId && !productId) {
+      throw createError("The selected item is missing its product identifier.");
+    }
+
+    if (!product && previous && !previous.productId && productId) {
+      throw createError("The selected item could not be verified.");
+    }
+
+    const completed =
+      input.completed === undefined
+        ? Boolean(previous?.completed)
+        : input.completed;
+
+    let purchaseDate = null;
+
+    if (completed) {
+      if (previous?.completed && previous.purchaseDate) {
+        purchaseDate = previous.purchaseDate;
+      } else {
+        purchaseDate = new Date();
+      }
+    }
+
+    const item = {
+      ...(previous?._id ? { _id: previous._id } : {}),
+      productId: product
+        ? product._id.toString()
+        : String(previous.productId || ""),
+      name: product ? product.name : previous.name,
+      category: product ? product.category : previous.category,
+      unitPrice: product ? product.unitPrice : previous.unitPrice,
+      quantity,
+      unit: product ? product.unit : previous.unit,
+      totalPrice: roundCurrency(
+        (product ? product.unitPrice : previous.unitPrice) * quantity
+      ),
+      completed,
+      purchaseDate,
+    };
+
+    prepared.push(item);
+  }
+
+  const mergedItems = [];
+  const productIndexes = new Map();
+
+  for (const item of prepared) {
+    const productId = String(item.productId || "");
+
+    if (!productId) {
+      mergedItems.push(item);
+      continue;
+    }
+
+    if (!productIndexes.has(productId)) {
+      productIndexes.set(productId, mergedItems.length);
+      mergedItems.push(item);
+      continue;
+    }
+
+    const existingIndex = productIndexes.get(productId);
+    const existing = mergedItems[existingIndex];
+
+    existing.quantity = roundCurrency(existing.quantity + item.quantity);
+    existing.completed = existing.completed && item.completed;
+    existing.purchaseDate =
+      existing.completed
+        ? existing.purchaseDate || item.purchaseDate
+        : null;
+    existing.totalPrice = roundCurrency(
+      existing.unitPrice * existing.quantity
+    );
+  }
+
+  return mergedItems;
+}
+
+function recalculateListStatus(list) {
+  const items = list.items || [];
+  const completedCount = items.filter((item) => item.completed).length;
+
+  if (items.length === 0 || completedCount === 0) {
+    list.status = "Pending";
+  } else if (completedCount === items.length) {
+    list.status = "Completed";
+  } else {
+    list.status = "In Progress";
+  }
+}
+
 router.use(authenticate);
 
-// GET /api/lists
-// Return only the current user's lists.
 router.get("/", async (req, res, next) => {
   try {
     const lists = await ShoppingList.find({
@@ -102,8 +291,6 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// GET /api/lists/:id
-// Return a list only if it belongs to the current user.
 router.get("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -129,24 +316,22 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-// POST /api/lists
-// Create a list owned by the current user.
 router.post("/", async (req, res, next) => {
   try {
-    const fields = pickAllowedFields(req.body);
+    const fields = validateListFields(pickAllowedFields(req.body), true);
 
-    const listData = {
+    const items = await prepareItems(
+      fields.items === undefined ? [] : fields.items
+    );
+
+    const list = new ShoppingList({
       ...fields,
+      items,
       owner: req.user.id,
-    };
+    });
 
-    if (fields.items !== undefined) {
-      const totals = calculateTotals(fields.items);
-      listData.items = totals.items;
-      listData.totalCost = totals.totalCost;
-    }
-
-    const list = await ShoppingList.create(listData);
+    recalculateListStatus(list);
+    await list.save();
 
     res.status(201).json(list);
   } catch (error) {
@@ -154,8 +339,6 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-// PUT /api/lists/:id
-// Update only a list belonging to the current user.
 router.put("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -164,11 +347,11 @@ router.put("/:id", async (req, res, next) => {
       });
     }
 
-    const fields = pickAllowedFields(req.body);
+    const fields = validateListFields(pickAllowedFields(req.body));
 
     if (Object.keys(fields).length === 0) {
       return res.status(400).json({
-        message: "No valid shopping-list fields were provided.",
+        message: "Provide at least one valid shopping-list field to update.",
       });
     }
 
@@ -183,12 +366,13 @@ router.put("/:id", async (req, res, next) => {
       });
     }
 
-    list.set(fields);
+    if (Object.prototype.hasOwnProperty.call(fields, "items")) {
+      list.items = await prepareItems(fields.items, list);
+      delete fields.items;
+    }
 
-    // Always recalculate totals from the list's actual items.
-    const totals = calculateTotals(list.items);
-    list.items = totals.items;
-    list.totalCost = totals.totalCost;
+    list.set(fields);
+    recalculateListStatus(list);
 
     await list.save();
 
@@ -198,8 +382,6 @@ router.put("/:id", async (req, res, next) => {
   }
 });
 
-// DELETE /api/lists/:id
-// Delete only a list belonging to the current user.
 router.delete("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -221,6 +403,7 @@ router.delete("/:id", async (req, res, next) => {
 
     res.status(200).json({
       message: "Shopping list deleted successfully.",
+      id: list._id.toString(),
     });
   } catch (error) {
     next(error);

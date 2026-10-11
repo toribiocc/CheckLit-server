@@ -1,3 +1,4 @@
+
 const dns = require("node:dns");
 
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -9,6 +10,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 
 const authRouter = require("./routes/auth");
+const categoriesRouter = require("./routes/categories");
 const productsRouter = require("./routes/products");
 const listsRouter = require("./routes/lists");
 
@@ -18,20 +20,15 @@ const errorHandler = require("./middleware/errorHandler");
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-// CORS configuration
 app.use(
   cors({
     origin: "http://localhost:5173",
   })
 );
 
-// Parse JSON request bodies
 app.use(express.json({ limit: "1mb" }));
-
-// Log incoming requests
 app.use(requestLogger);
 
-// API root
 app.get("/", (req, res) => {
   res.status(200).json({
     message: "CheckLit API is running!",
@@ -39,7 +36,6 @@ app.get("/", (req, res) => {
   });
 });
 
-// MongoDB connection status
 app.get("/api/health", (req, res) => {
   const connected = mongoose.connection.readyState === 1;
 
@@ -49,12 +45,11 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// API routes
 app.use("/api/auth", authRouter);
+app.use("/api/categories", categoriesRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/lists", listsRouter);
 
-// Handle unknown endpoints
 app.use((req, res) => {
   res.status(404).json({
     message: "API endpoint not found.",
@@ -62,10 +57,8 @@ app.use((req, res) => {
   });
 });
 
-// Centralized error handler (must be last)
 app.use(errorHandler);
 
-// Start server after connecting to MongoDB
 async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
