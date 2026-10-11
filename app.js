@@ -12,16 +12,24 @@ const authRouter = require("./routes/auth");
 const productsRouter = require("./routes/products");
 const listsRouter = require("./routes/lists");
 
+const requestLogger = require("./middleware/requestLogger");
+const errorHandler = require("./middleware/errorHandler");
+
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// CORS configuration
 app.use(
   cors({
     origin: "http://localhost:5173",
   })
 );
 
+// Parse JSON request bodies
 app.use(express.json({ limit: "1mb" }));
+
+// Log incoming requests
+app.use(requestLogger);
 
 // API root
 app.get("/", (req, res) => {
@@ -54,35 +62,8 @@ app.use((req, res) => {
   });
 });
 
-// Central error handler
-app.use((error, req, res, next) => {
-  console.error("API error:", error.message);
-
-  if (res.headersSent) {
-    return next(error);
-  }
-
-  if (
-    error.name === "ValidationError" ||
-    error.name === "CastError" ||
-    (error instanceof SyntaxError && error.status === 400)
-  ) {
-    return res.status(400).json({
-      message: "Invalid request data.",
-      error: error.message,
-    });
-  }
-
-  if (error.code === 11000) {
-    return res.status(409).json({
-      message: "A record with these details already exists.",
-    });
-  }
-
-  res.status(500).json({
-    message: "An unexpected server error occurred.",
-  });
-});
+// Centralized error handler (must be last)
+app.use(errorHandler);
 
 // Start server after connecting to MongoDB
 async function startServer() {
