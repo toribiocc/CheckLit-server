@@ -1,3 +1,4 @@
+
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -21,7 +22,26 @@ function createToken(user) {
   );
 }
 
-// POST /api/auth/register
+function getPasswordValidationMessage(password) {
+  if (password.length < 8 || password.length > 72) {
+    return "Password must be between 8 and 72 characters.";
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return "Password must contain at least one uppercase letter (A-Z).";
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return "Password must contain at least one lowercase letter (a-z).";
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return "Password must contain at least one number (0-9).";
+  }
+
+  return null;
+}
+
 router.post("/register", async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
@@ -47,18 +67,17 @@ router.post("/register", async (req, res, next) => {
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (
-      cleanEmail.length > 254 ||
-      !emailPattern.test(cleanEmail)
-    ) {
+    if (cleanEmail.length > 254 || !emailPattern.test(cleanEmail)) {
       return res.status(400).json({
         message: "Please provide a valid email address.",
       });
     }
 
-    if (password.length < 8 || password.length > 72) {
+    const passwordError = getPasswordValidationMessage(password);
+
+    if (passwordError) {
       return res.status(400).json({
-        message: "Password must be between 8 and 72 characters.",
+        message: passwordError,
       });
     }
 
@@ -74,7 +93,6 @@ router.post("/register", async (req, res, next) => {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Role is intentionally assigned by the server.
     const user = await User.create({
       name: cleanName,
       email: cleanEmail,
@@ -105,7 +123,6 @@ router.post("/register", async (req, res, next) => {
   }
 });
 
-// POST /api/auth/login
 router.post("/login", async (req, res, next) => {
   try {
     const { email, password } = req.body;

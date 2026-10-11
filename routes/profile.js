@@ -8,6 +8,26 @@ const router = express.Router();
 
 router.use(authenticate);
 
+function getPasswordValidationMessage(password) {
+  if (password.length < 8 || password.length > 72) {
+    return "New password must be between 8 and 72 characters.";
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return "New password must contain at least one uppercase letter (A-Z).";
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return "New password must contain at least one lowercase letter (a-z).";
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return "New password must contain at least one number (0-9).";
+  }
+
+  return null;
+}
+
 router.get("/", async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -20,7 +40,7 @@ router.get("/", async (req, res, next) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       id: user._id.toString(),
       name: user.name,
       email: user.email,
@@ -63,7 +83,7 @@ router.put("/", async (req, res, next) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Profile updated successfully.",
       user: {
         id: user._id.toString(),
@@ -94,9 +114,11 @@ router.patch("/password", async (req, res, next) => {
       });
     }
 
-    if (newPassword.length < 8 || newPassword.length > 72) {
+    const passwordError = getPasswordValidationMessage(newPassword);
+
+    if (passwordError) {
       return res.status(400).json({
-        message: "New password must be between 8 and 72 characters.",
+        message: passwordError,
       });
     }
 
@@ -115,7 +137,7 @@ router.patch("/password", async (req, res, next) => {
 
     if (!currentPasswordMatches) {
       return res.status(400).json({
-        message: "Current password is incorrect.",
+        message: "Your current password is incorrect. Please try again.",
       });
     }
 
@@ -126,14 +148,14 @@ router.patch("/password", async (req, res, next) => {
 
     if (samePassword) {
       return res.status(400).json({
-        message: "New password must be different from the current password.",
+        message: "Your new password must be different from your current password.",
       });
     }
 
     user.password = await bcrypt.hash(newPassword, 12);
     await user.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Password changed successfully.",
     });
   } catch (error) {
