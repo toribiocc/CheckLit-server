@@ -5,7 +5,6 @@ const authenticate = require("../middleware/auth");
 
 const router = express.Router();
 
-// Fields users are allowed to set or update
 const allowedFields = [
   "title",
   "store",
@@ -13,7 +12,6 @@ const allowedFields = [
   "budget",
   "notes",
   "items",
-  "totalCost",
   "status",
 ];
 
@@ -29,11 +27,69 @@ function pickAllowedFields(body) {
   return result;
 }
 
-// All list endpoints require authentication.
+function calculateTotals(items) {
+  if (!Array.isArray(items)) {
+    const error = new Error("Items must be an array.");
+    error.status = 400;
+    throw error;
+  }
+
+  let totalCost = 0;
+
+  const calculatedItems = items.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      const error = new Error("Each item must be a valid object.");
+      error.status = 400;
+      throw error;
+    }
+
+    const unitPrice = Number(item.unitPrice);
+    const quantity = Number(item.quantity);
+
+    if (
+      item.unitPrice === "" ||
+      item.quantity === "" ||
+      !Number.isFinite(unitPrice) ||
+      !Number.isFinite(quantity) ||
+      unitPrice < 0 ||
+      quantity < 0
+    ) {
+      const error = new Error(
+        "Each item must have a valid, non-negative unit price and quantity."
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    const totalPrice =
+      Math.round(
+        (unitPrice * quantity + Number.EPSILON) * 100
+      ) / 100;
+
+    totalCost += totalPrice;
+
+    return {
+      ...item,
+      unitPrice,
+      quantity,
+      totalPrice,
+    };
+  });
+
+  totalCost =
+    Math.round((totalCost + Number.EPSILON) * 100) / 100;
+
+  return {
+    items: calculatedItems,
+    totalCost,
+  };
+}
+
+// All shopping-list routes require authentication.
 router.use(authenticate);
 
 // GET /api/lists
-// Return only lists belonging to the logged-in user.
+// Return only the current user's lists.
 router.get("/", async (req, res, next) => {
   try {
     const lists = await ShoppingList.find({
@@ -47,7 +103,7 @@ router.get("/", async (req, res, next) => {
 });
 
 // GET /api/lists/:id
-// Return one list only if it belongs to the logged-in user.
+// Return a list only if it belongs to the current user.
 router.get("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -74,15 +130,23 @@ router.get("/:id", async (req, res, next) => {
 });
 
 // POST /api/lists
-// Create a list owned by the logged-in user.
+// Create a list owned by the current user.
 router.post("/", async (req, res, next) => {
   try {
     const fields = pickAllowedFields(req.body);
 
-    const list = await ShoppingList.create({
+    const listData = {
       ...fields,
       owner: req.user.id,
-    });
+    };
+
+    if (fields.items !== undefined) {
+      const totals = calculateTotals(fields.items);
+      listData.items = totals.items;
+      listData.totalCost = totals.totalCost;
+    }
+
+    const list = await ShoppingList.create(listData);
 
     res.status(201).json(list);
   } catch (error) {
@@ -91,7 +155,7 @@ router.post("/", async (req, res, next) => {
 });
 
 // PUT /api/lists/:id
-// Update only a list belonging to the logged-in user.
+// Update only a list belonging to the current user.
 router.put("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -102,7 +166,6 @@ router.put("/:id", async (req, res, next) => {
 
     const fields = pickAllowedFields(req.body);
 
-    // Do not allow an empty or unrelated update.
     if (Object.keys(fields).length === 0) {
       return res.status(400).json({
         message: "No valid shopping-list fields were provided.",
@@ -121,6 +184,12 @@ router.put("/:id", async (req, res, next) => {
     }
 
     list.set(fields);
+
+    // Always recalculate totals from the list's actual items.
+    const totals = calculateTotals(list.items);
+    list.items = totals.items;
+    list.totalCost = totals.totalCost;
+
     await list.save();
 
     res.status(200).json(list);
@@ -130,7 +199,7 @@ router.put("/:id", async (req, res, next) => {
 });
 
 // DELETE /api/lists/:id
-// Delete only a list belonging to the logged-in user.
+// Delete only a list belonging to the current user.
 router.delete("/:id", async (req, res, next) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
