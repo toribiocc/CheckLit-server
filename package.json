@@ -1,12 +1,20 @@
 {
-  "name": "online-shop-express-backend",
+  "name": "checklit-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "CheckLit Express and MongoDB backend",
+  "main": "app.js",
   "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "seed": "node scripts/seed.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "checklit",
+    "express",
+    "mongodb",
+    "mongoose"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
