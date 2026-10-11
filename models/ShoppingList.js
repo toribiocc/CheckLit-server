@@ -89,6 +89,7 @@ const shoppingListSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: [0, "Budget cannot be negative."],
+      max: [1000000, "Budget cannot exceed 1,000,000."],
       validate: {
         validator: Number.isFinite,
         message: "Budget must be a valid number.",

@@ -87,9 +87,12 @@ function validateListFields(fields, isCreate = false) {
       fields.budget === "" ||
       fields.budget === null ||
       !Number.isFinite(budget) ||
-      budget < 0
+      budget < 0 ||
+      budget > 1000000
     ) {
-      throw createError("Budget must be a valid non-negative number.");
+      throw createError(
+        "Budget must be a number between 0 and 1,000,000."
+      );
     }
 
     fields.budget = budget;

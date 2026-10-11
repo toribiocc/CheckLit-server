@@ -76,14 +76,8 @@ async function seed() {
     throw new Error("MONGO_URI is missing from .env.");
   }
 
-  if (!ADMIN_NAME || !ADMIN_EMAIL || !ADMIN_PASSWORD) {
-    throw new Error(
-      "ADMIN_NAME, ADMIN_EMAIL, and ADMIN_PASSWORD must be set in .env."
-    );
-  }
-
-  if (ADMIN_PASSWORD.length < 8 || ADMIN_PASSWORD.length > 72) {
-    throw new Error("ADMIN_PASSWORD must be between 8 and 72 characters.");
+  if (!ADMIN_NAME || !ADMIN_EMAIL) {
+    throw new Error("ADMIN_NAME and ADMIN_EMAIL must be set in .env.");
   }
 
   await mongoose.connect(MONGO_URI);
@@ -94,6 +88,26 @@ async function seed() {
   let admin = await User.findOne({ email });
 
   if (!admin) {
+    if (typeof ADMIN_PASSWORD !== "string" || !ADMIN_PASSWORD) {
+      throw new Error("ADMIN_PASSWORD must be set when creating the admin account.");
+    }
+
+    if (ADMIN_PASSWORD.length < 8 || ADMIN_PASSWORD.length > 72) {
+      throw new Error("ADMIN_PASSWORD must be between 8 and 72 characters.");
+    }
+
+    if (!/[A-Z]/.test(ADMIN_PASSWORD)) {
+      throw new Error("ADMIN_PASSWORD must contain at least one uppercase letter (A-Z).");
+    }
+
+    if (!/[a-z]/.test(ADMIN_PASSWORD)) {
+      throw new Error("ADMIN_PASSWORD must contain at least one lowercase letter (a-z).");
+    }
+
+    if (!/[0-9]/.test(ADMIN_PASSWORD)) {
+      throw new Error("ADMIN_PASSWORD must contain at least one number (0-9).");
+    }
+
     const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
     admin = await User.create({
