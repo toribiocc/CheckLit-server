@@ -13,6 +13,7 @@ const authRouter = require("./routes/auth");
 const categoriesRouter = require("./routes/categories");
 const productsRouter = require("./routes/products");
 const listsRouter = require("./routes/lists");
+const profileRouter = require("./routes/profile");
 
 const requestLogger = require("./middleware/requestLogger");
 const errorHandler = require("./middleware/errorHandler");
@@ -49,6 +50,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/lists", listsRouter);
+app.use("/api/profile", profileRouter);
 
 app.use((req, res) => {
   res.status(404).json({
