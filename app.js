@@ -1,4 +1,3 @@
-
 const dns = require("node:dns");
 
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -9,6 +8,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
+const authRouter = require("./routes/auth");
 const productsRouter = require("./routes/products");
 const listsRouter = require("./routes/lists");
 
@@ -42,6 +42,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // API routes
+app.use("/api/auth", authRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/lists", listsRouter);
 
@@ -64,7 +65,7 @@ app.use((error, req, res, next) => {
   if (
     error.name === "ValidationError" ||
     error.name === "CastError" ||
-    error instanceof SyntaxError && error.status === 400
+    (error instanceof SyntaxError && error.status === 400)
   ) {
     return res.status(400).json({
       message: "Invalid request data.",
@@ -88,6 +89,10 @@ async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
       throw new Error("MONGO_URI is missing from the .env file.");
+    }
+
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is missing from the .env file.");
     }
 
     await mongoose.connect(process.env.MONGO_URI);
